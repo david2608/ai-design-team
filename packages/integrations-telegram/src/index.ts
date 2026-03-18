@@ -1,5 +1,6 @@
 import type {
   Artifact,
+  AttachmentReferenceInput,
   ArtifactVisualAsset,
   TelegramBinding,
   TelegramCallbackAction,
@@ -60,6 +61,14 @@ interface TelegramUpdate {
   callback_query?: TelegramCallbackQuery;
 }
 
+interface TelegramGetFileResponse {
+  ok?: boolean;
+  result?: {
+    file_path?: string;
+    file_size?: number;
+  };
+}
+
 export interface TelegramCallbackPayload {
   action?: TelegramCallbackAction;
   provider?: TelegramGenerationProvider;
@@ -76,6 +85,16 @@ export interface TelegramDeliveryAdapter {
   status: "live" | "placeholder";
   botTokenConfigured: boolean;
   normalizeUpdate(update: TelegramWebhookRequest | unknown): TelegramInboundRequest | null;
+  downloadFile(input: {
+    attachmentId: string;
+    sourceId?: string;
+    order: number;
+    kind: AttachmentReferenceInput["kind"];
+    fileId: string;
+    fileName?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+  }): Promise<AttachmentReferenceInput | null>;
   sendMessage(message: TelegramOutboundMessage): Promise<TelegramSendResult>;
   editMessage(input: {
     chatId: string;
@@ -592,6 +611,51 @@ class BotApiTelegramDeliveryAdapter implements TelegramDeliveryAdapter {
     }
 
     return null;
+  }
+
+  async downloadFile(input: {
+    attachmentId: string;
+    sourceId?: string;
+    order: number;
+    kind: AttachmentReferenceInput["kind"];
+    fileId: string;
+    fileName?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+  }): Promise<AttachmentReferenceInput | null> {
+    if (!this.botTokenConfigured) {
+      return null;
+    }
+
+    const file = (await postTelegram(this.botToken, "getFile", {
+      file_id: input.fileId
+    })) as TelegramGetFileResponse;
+    const filePath = file.result?.file_path;
+    if (!filePath) {
+      return null;
+    }
+
+    const response = await fetch(`https://api.telegram.org/file/bot${this.botToken}/${filePath}`);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Telegram file download failed: ${response.status} ${body}`);
+    }
+
+    const fileBytes = Buffer.from(await response.arrayBuffer());
+    const fileName = input.fileName ?? filePath.split("/").at(-1) ?? `${input.fileId}.bin`;
+    const mimeType = input.mimeType ?? response.headers.get("content-type") ?? "application/octet-stream";
+
+    return {
+      attachmentId: input.attachmentId,
+      sourceId: input.sourceId,
+      order: input.order,
+      kind: input.kind,
+      fileName,
+      mimeType,
+      storageKey: input.fileId,
+      sizeBytes: input.sizeBytes ?? file.result?.file_size,
+      base64Data: fileBytes.toString("base64")
+    };
   }
 
   async sendMessage(message: TelegramOutboundMessage): Promise<TelegramSendResult> {

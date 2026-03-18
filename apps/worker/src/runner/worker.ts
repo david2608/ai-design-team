@@ -1,6 +1,6 @@
 import { createId } from "@ai-design-team/utils";
 
-import type { Job } from "@ai-design-team/types";
+import type { Attachment, AttachmentReferenceInput, Job, ProjectSnapshot } from "@ai-design-team/types";
 import type { WorkerContext } from "./context.js";
 import { createTelegramProgressTracker } from "./telegram-progress.js";
 
@@ -11,6 +11,103 @@ function nowIso(): string {
 function getJobTraceId(job: Pick<Job, "id" | "metadata">): string {
   const traceId = job.metadata?.traceId;
   return typeof traceId === "string" && traceId.trim() ? traceId : `job:${job.id}`;
+}
+
+function isImageAttachment(attachment: Attachment): boolean {
+  if (attachment.kind === "image" || attachment.kind === "reference") {
+    return true;
+  }
+
+  if (typeof attachment.mimeType === "string" && attachment.mimeType.startsWith("image/")) {
+    return true;
+  }
+
+  return /\.(png|jpe?g|webp|gif|svg)$/i.test(attachment.fileName ?? "");
+}
+
+function getJobSourceId(job: Job): string | undefined {
+  const inputSourceId = job.input?.sourceId;
+  if (typeof inputSourceId === "string" && inputSourceId.trim()) {
+    return inputSourceId;
+  }
+
+  const metadataSourceId = job.metadata?.sourceId;
+  return typeof metadataSourceId === "string" && metadataSourceId.trim() ? metadataSourceId : undefined;
+}
+
+async function resolveAttachmentReferences(
+  context: WorkerContext,
+  snapshot: ProjectSnapshot,
+  job: Job,
+  traceId: string,
+  workerId: string
+): Promise<AttachmentReferenceInput[]> {
+  const sourceId = getJobSourceId(job);
+  const scopedAttachments = sourceId
+    ? snapshot.attachments.filter((attachment) => attachment.sourceId === sourceId)
+    : snapshot.attachments;
+  const candidateAttachments = scopedAttachments.filter(isImageAttachment).slice(0, 4);
+
+  if (candidateAttachments.length === 0) {
+    context.logger.info("worker.attachments.none_found", {
+      traceId,
+      workerId,
+      jobId: job.id,
+      projectId: job.projectId,
+      sourceId: sourceId ?? null
+    });
+    return [];
+  }
+
+  const references: AttachmentReferenceInput[] = [];
+  for (const [index, attachment] of candidateAttachments.entries()) {
+    if (!attachment.storageKey) {
+      context.logger.warn("worker.attachments.missing_storage_key", {
+        traceId,
+        workerId,
+        jobId: job.id,
+        projectId: job.projectId,
+        attachmentId: attachment.id
+      });
+      continue;
+    }
+
+    try {
+      const downloaded = await context.telegram.downloadFile({
+        attachmentId: attachment.id,
+        sourceId: attachment.sourceId,
+        order: index + 1,
+        kind: attachment.kind,
+        fileId: attachment.storageKey,
+        fileName: attachment.fileName,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes
+      });
+      if (downloaded) {
+        references.push(downloaded);
+      }
+    } catch (error) {
+      context.logger.warn("worker.attachments.download_failed", {
+        traceId,
+        workerId,
+        jobId: job.id,
+        projectId: job.projectId,
+        attachmentId: attachment.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  context.logger.info("worker.attachments.resolved", {
+    traceId,
+    workerId,
+    jobId: job.id,
+    projectId: job.projectId,
+    sourceId: sourceId ?? null,
+    attachmentCount: references.length
+  });
+
+  return references;
 }
 
 async function checkCancellation(context: WorkerContext, jobId: string): Promise<Job | null> {
@@ -138,7 +235,31 @@ export async function processClaimedJob(context: WorkerContext, workerId: string
       return true;
     }
 
-    const pipelineResult = await context.pipeline.generate(snapshot, currentJob, {
+    const attachmentReferences = await resolveAttachmentReferences(context, snapshot, currentJob, traceId, workerId);
+    const serializedAttachmentReferences = attachmentReferences.map((reference) => ({
+      attachmentId: reference.attachmentId,
+      sourceId: reference.sourceId ?? null,
+      order: reference.order,
+      kind: reference.kind,
+      fileName: reference.fileName ?? null,
+      mimeType: reference.mimeType,
+      storageKey: reference.storageKey ?? null,
+      sizeBytes: reference.sizeBytes ?? null,
+      role: reference.role ?? null,
+      base64Data: reference.base64Data
+    }));
+    const generationJob =
+      attachmentReferences.length > 0
+        ? {
+            ...currentJob,
+            input: {
+              ...currentJob.input,
+              attachmentReferences: serializedAttachmentReferences
+            }
+          }
+        : currentJob;
+
+    const pipelineResult = await context.pipeline.generate(snapshot, generationJob, {
       onStageUpdate: async (update) => {
         await progressTracker?.handleStage(update);
       },

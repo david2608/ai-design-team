@@ -17,6 +17,7 @@ const baseSnapshot = {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
+  attachments: [],
   jobs: [],
   timeline: []
 };
@@ -276,4 +277,126 @@ test("pipeline emits stage updates and an early preview before returning the fin
   );
   assert.equal(previews.length, 1);
   assert.match(previews[0]!.title, /Direction/);
+});
+
+test("pipeline passes uploaded image references into generation for image remix requests", async () => {
+  let geminiInput: any;
+
+  const pipeline = createArtifactGenerationPipeline({
+    gemini: {
+      provider: "gemini",
+      model: "gemini-2.5-flash-image",
+      status: "live",
+      async generateImage(input) {
+        geminiInput = input;
+        return {
+          asset: {
+            kind: "photo",
+            mimeType: "image/png",
+            fileName: "artifact.png",
+            base64Data: "ZmFrZQ==",
+            source: "gemini",
+            prompt: input.prompt
+          }
+        };
+      }
+    }
+  });
+
+  const result = await pipeline.generate(baseSnapshot as any, {
+    id: "job_4",
+    projectId: "project_1",
+    type: "artifact_generation",
+    status: "running",
+    queue: "default",
+    availableAt: new Date().toISOString(),
+    attemptCount: 1,
+    maxAttempts: 3,
+    input: {
+      messageText: "Create poster from the 1st uploaded guy image using all other data from 2nd image.",
+      attachmentReferences: [
+        {
+          attachmentId: "attachment_1",
+          order: 1,
+          kind: "image",
+          mimeType: "image/jpeg",
+          fileName: "person.jpg",
+          base64Data: "ZmFrZTE="
+        },
+        {
+          attachmentId: "attachment_2",
+          order: 2,
+          kind: "image",
+          mimeType: "image/jpeg",
+          fileName: "poster.jpg",
+          base64Data: "ZmFrZTI="
+        }
+      ]
+    },
+    metadata: {
+      provider: "gemini"
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  } as any);
+
+  assert.equal(geminiInput.referenceImages.length, 2);
+  assert.match(geminiInput.prompt, /Use image 1 as the main subject/i);
+  assert.equal((result.body as any).referenceImageCount, 2);
+  assert.equal((result.body as any).visualAsset.source, "gemini");
+});
+
+test("pipeline fallback visual uses uploaded image references when live generation is unavailable", async () => {
+  const pipeline = createArtifactGenerationPipeline({
+    openAi: {
+      provider: "openai",
+      model: "gpt-image-1.5",
+      status: "placeholder",
+      allowStub: true,
+      async generateImage() {
+        return null;
+      }
+    }
+  });
+
+  const result = await pipeline.generate(baseSnapshot as any, {
+    id: "job_5",
+    projectId: "project_1",
+    type: "artifact_generation",
+    status: "running",
+    queue: "default",
+    availableAt: new Date().toISOString(),
+    attemptCount: 1,
+    maxAttempts: 3,
+    input: {
+      messageText: "Create poster from the 1st uploaded guy image using all other data from 2nd image.",
+      attachmentReferences: [
+        {
+          attachmentId: "attachment_1",
+          order: 1,
+          kind: "image",
+          mimeType: "image/jpeg",
+          fileName: "person.jpg",
+          base64Data: "ZmFrZTE="
+        },
+        {
+          attachmentId: "attachment_2",
+          order: 2,
+          kind: "image",
+          mimeType: "image/jpeg",
+          fileName: "poster.jpg",
+          base64Data: "ZmFrZTI="
+        }
+      ]
+    },
+    metadata: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  } as any);
+
+  const svg = Buffer.from((result.body as any).visualAsset.base64Data, "base64").toString("utf8");
+  assert.equal((result.body as any).visualAsset.source, "local_svg");
+  assert.match(svg, /Image 1 • Hero subject/);
+  assert.match(svg, /data:image\/jpeg;base64,ZmFrZTE=/);
+  assert.match(svg, /data:image\/jpeg;base64,ZmFrZTI=/);
 });

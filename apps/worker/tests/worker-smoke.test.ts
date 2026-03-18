@@ -44,6 +44,22 @@ test("claimed plain-text job is processed into an artifact and Telegram delivery
   const snapshot: ProjectSnapshot = {
     project,
     telegramBinding: binding,
+    attachments: [
+      {
+        id: "attachment_1",
+        projectId: project.id,
+        sourceId: "source_1",
+        artifactId: undefined,
+        kind: "image",
+        fileName: "portrait.jpg",
+        mimeType: "image/jpeg",
+        storageKey: "telegram-file-1",
+        sizeBytes: 1024,
+        metadata: {},
+        createdAt: timestamp,
+        updatedAt: timestamp
+      }
+    ],
     jobs: [],
     timeline: []
   };
@@ -66,15 +82,16 @@ test("claimed plain-text job is processed into an artifact and Telegram delivery
     cancelledAt: undefined,
     lastError: undefined,
     parentJobId: undefined,
-    sourceArtifactId: undefined,
-    revisionRequestId: undefined,
-    input: {
-      brief: project.brief,
-      messageText: "create poster for calligraphy lesson"
-    },
-    metadata: {
-      traceId: "telegram:update:500"
-    },
+      sourceArtifactId: undefined,
+      revisionRequestId: undefined,
+      input: {
+        brief: project.brief,
+        messageText: "create poster for calligraphy lesson",
+        sourceId: "source_1"
+      },
+      metadata: {
+        traceId: "telegram:update:500"
+      },
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -106,6 +123,8 @@ test("claimed plain-text job is processed into an artifact and Telegram delivery
     },
     pipeline: {
       generate: async (_snapshot: unknown, _job: unknown, observer?: { onStageUpdate?: (input: { id: "compose" | "render"; label: string; status: "completed" | "running"; detail: string }) => Promise<void>; onPreview?: (input: { title: string; recommendedDirection: string; bigIdea: string; nextStep: string }) => Promise<void> }) => {
+        assert.equal(Array.isArray((_job as Job).input.attachmentReferences), true);
+        assert.equal(((_job as Job).input.attachmentReferences as Array<unknown>).length, 1);
         await observer?.onStageUpdate?.({
           id: "compose",
           label: "Compose",
@@ -139,6 +158,17 @@ test("claimed plain-text job is processed into an artifact and Telegram delivery
       }
     },
     telegram: {
+      downloadFile: async () => ({
+        attachmentId: "attachment_1",
+        sourceId: "source_1",
+        order: 1,
+        kind: "image",
+        fileName: "portrait.jpg",
+        mimeType: "image/jpeg",
+        storageKey: "telegram-file-1",
+        sizeBytes: 1024,
+        base64Data: "ZmFrZQ=="
+      }),
       sendChatAction: async (input: { action: string }) => {
         chatActions.push(input.action);
       },

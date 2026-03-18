@@ -56,6 +56,7 @@ function createContext(input: {
       status: "live" as const,
       botTokenConfigured: true,
       normalizeUpdate: () => input.inbound,
+      downloadFile: async () => null,
       sendMessage: async () => {
         sentMessageCount += 1;
         return {
@@ -63,9 +64,19 @@ function createContext(input: {
           messageId: `message_${sentMessageCount}`
         };
       },
+      editMessage: async () => ({
+        ok: true,
+        messageId: "edited_1"
+      }),
+      sendChatAction: async () => undefined,
       answerCallbackQuery: async () => {
         answeredCallbackCount += 1;
-      }
+      },
+      deliverArtifact: async () => ({
+        ok: true,
+        messageId: "artifact_1"
+      }),
+      deliverPlaceholder: async () => undefined
     },
     services: {
       telegram: {

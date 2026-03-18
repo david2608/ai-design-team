@@ -1,6 +1,7 @@
 import type {
   ArtifactKind,
   ArtifactVisualAsset,
+  AttachmentReferenceInput,
   Job,
   JsonObject,
   ProjectSnapshot,
@@ -62,6 +63,7 @@ export interface ArtifactGenerationPipelineInput {
 export interface GeminiImageGenerationInput {
   prompt: string;
   aspectRatio?: "1:1" | "2:3" | "3:2";
+  referenceImages?: AttachmentReferenceInput[];
 }
 
 export interface GeminiImageGenerationResult {
@@ -98,6 +100,14 @@ interface NormalizedCreativeRequest {
   brief: string;
   latestMessage?: string;
   revisionNote?: string;
+  referenceImages: AttachmentReferenceInput[];
+  referencePlan?: {
+    subjectImage?: AttachmentReferenceInput;
+    styleImage?: AttachmentReferenceInput;
+    supportingImages: AttachmentReferenceInput[];
+    instructions: string[];
+    summary?: string;
+  };
   previousQuestion?: {
     title?: string;
     options: string[];
@@ -170,6 +180,16 @@ class LiveGeminiAdapter implements GeminiAdapter {
   ) {}
 
   async generateImage(input: GeminiImageGenerationInput): Promise<GeminiImageGenerationResult | null> {
+    const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: input.prompt }];
+    for (const reference of input.referenceImages ?? []) {
+      parts.push({
+        inlineData: {
+          mimeType: reference.mimeType,
+          data: reference.base64Data
+        }
+      });
+    }
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`,
       {
@@ -182,7 +202,7 @@ class LiveGeminiAdapter implements GeminiAdapter {
         body: JSON.stringify({
           contents: [
             {
-              parts: [{ text: input.prompt }]
+              parts
             }
           ],
           generationConfig: {
@@ -201,8 +221,8 @@ class LiveGeminiAdapter implements GeminiAdapter {
     }
 
     const result = (await response.json()) as GeminiGenerateContentResponse;
-    const parts = result.candidates?.[0]?.content?.parts ?? [];
-    const image = parts.find((part) => typeof part.inlineData?.data === "string")?.inlineData;
+    const responseParts = result.candidates?.[0]?.content?.parts ?? [];
+    const image = responseParts.find((part) => typeof part.inlineData?.data === "string")?.inlineData;
     if (!image?.data || !image.mimeType) {
       return null;
     }
@@ -324,6 +344,120 @@ function countMatches(text: string, values: readonly string[]): number {
   return values.reduce((count, value) => count + (text.includes(value) ? 1 : 0), 0);
 }
 
+function extractAttachmentReferences(job: Job): AttachmentReferenceInput[] {
+  const raw = job.input.attachmentReferences;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const references: AttachmentReferenceInput[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    if (
+      typeof candidate.attachmentId !== "string" ||
+      typeof candidate.order !== "number" ||
+      typeof candidate.kind !== "string" ||
+      typeof candidate.mimeType !== "string" ||
+      typeof candidate.base64Data !== "string"
+    ) {
+      continue;
+    }
+
+    references.push({
+      attachmentId: candidate.attachmentId,
+      sourceId: typeof candidate.sourceId === "string" ? candidate.sourceId : undefined,
+      order: candidate.order,
+      kind: candidate.kind as AttachmentReferenceInput["kind"],
+      fileName: typeof candidate.fileName === "string" ? candidate.fileName : undefined,
+      mimeType: candidate.mimeType,
+      storageKey: typeof candidate.storageKey === "string" ? candidate.storageKey : undefined,
+      sizeBytes: typeof candidate.sizeBytes === "number" ? candidate.sizeBytes : undefined,
+      role: typeof candidate.role === "string" ? (candidate.role as AttachmentReferenceInput["role"]) : undefined,
+      base64Data: candidate.base64Data
+    });
+  }
+
+  return references.sort((a, b) => a.order - b.order);
+}
+
+function inferReferencePlan(
+  text: string,
+  referenceImages: AttachmentReferenceInput[]
+): NormalizedCreativeRequest["referencePlan"] {
+  if (referenceImages.length === 0) {
+    return undefined;
+  }
+
+  if (referenceImages.length === 1) {
+    return {
+      subjectImage: referenceImages[0],
+      supportingImages: [],
+      instructions: ["Use the uploaded image as the primary visual source for the generated result."],
+      summary: "Use the uploaded image as the hero reference."
+    };
+  }
+
+  const normalizedText = text.toLowerCase();
+  const first = referenceImages[0];
+  const second = referenceImages[1];
+  const mentionsFirst = hasAny(normalizedText, [
+    "1st uploaded",
+    "first uploaded",
+    "image 1",
+    "1st image",
+    "first image"
+  ]);
+  const mentionsSecond = hasAny(normalizedText, [
+    "2nd uploaded",
+    "second uploaded",
+    "image 2",
+    "2nd image",
+    "second image"
+  ]);
+  const useSecondAsReference = hasAny(normalizedText, [
+    "using all other data from 2nd",
+    "all other data from 2nd",
+    "from the 2nd",
+    "from 2nd image",
+    "style from 2nd",
+    "layout from 2nd",
+    "reference from 2nd",
+    "using the second image",
+    "use the second image",
+    "replace the person"
+  ]);
+
+  if ((mentionsFirst && mentionsSecond) || useSecondAsReference) {
+    return {
+      subjectImage: first,
+      styleImage: second,
+      supportingImages: referenceImages.slice(2),
+      instructions: [
+        "Use image 1 as the main subject or person to preserve.",
+        "Use image 2 as the visual reference for composition, typography, hierarchy, and supporting content.",
+        "Rebuild the result as one coherent design, not as two images placed side by side."
+      ],
+      summary: "Use image 1 as the hero subject and image 2 as the poster/style reference."
+    };
+  }
+
+  return {
+    subjectImage: first,
+    styleImage: second,
+    supportingImages: referenceImages.slice(2),
+    instructions: [
+      "Use the first uploaded image as the hero visual reference.",
+      "Use the second uploaded image to influence layout, style, and supporting design cues.",
+      "Keep the final result unified and production-like."
+    ],
+    summary: "Use the uploaded images as subject and design references."
+  };
+}
+
 function normalizeRequest(snapshot: ProjectSnapshot, job: Job): NormalizedCreativeRequest {
   const brief = cleanText(snapshot.project.brief) ?? snapshot.project.title;
   const latestMessage =
@@ -335,11 +469,18 @@ function normalizeRequest(snapshot: ProjectSnapshot, job: Job): NormalizedCreati
       ? cleanText(job.input.revisionNote)
       : undefined;
   const previousBody = snapshot.latestVisibleArtifact?.body ?? {};
+  const referenceImages = extractAttachmentReferences(job);
+  const referencePlan = inferReferencePlan(
+    [latestMessage, revisionNote, brief].filter(Boolean).join(" "),
+    referenceImages
+  );
 
   return {
     brief,
     latestMessage,
     revisionNote,
+    referenceImages,
+    referencePlan,
     previousArtifact: snapshot.latestVisibleArtifact
       ? {
           title: snapshot.latestVisibleArtifact.title,
@@ -591,6 +732,10 @@ function inferIntentFamily(request: NormalizedCreativeRequest, job: Job): Intent
 function buildAssumptions(request: NormalizedCreativeRequest, family: CreativeIntentFamily): string[] {
   const text = getWorkingText(request, { type: "artifact_generation" } as Job).toLowerCase();
   const assumptions: string[] = [];
+
+  if (request.referencePlan?.summary) {
+    assumptions.push(request.referencePlan.summary);
+  }
 
   if (family === "image_generation" && !hasAny(text, ["portrait", "square", "vertical", "wide"])) {
     assumptions.push("Assuming a portrait-friendly composition with one dominant focal subject.");
@@ -913,6 +1058,8 @@ interface VisualAssetSpec {
   nextAction: string;
   prompt: string;
   styleOptions: string[];
+  referenceImages?: AttachmentReferenceInput[];
+  referenceInstructions?: string[];
 }
 
 interface VisualAssetResult {
@@ -935,6 +1082,10 @@ function slugify(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48) || "design-artifact";
+}
+
+function toDataUri(reference: AttachmentReferenceInput): string {
+  return `data:${reference.mimeType};base64,${reference.base64Data}`;
 }
 
 function wrapText(value: string, maxChars: number): string[] {
@@ -1026,6 +1177,9 @@ function buildOpenAiVisualPrompt(spec: VisualAssetSpec): string {
     `Visual direction: ${spec.visualDirection}`,
     `Layout idea: ${spec.layoutIdea}`,
     spec.copyDirection ? `Copy direction: ${spec.copyDirection}` : undefined,
+    spec.referenceInstructions?.length
+      ? `Reference-image instructions: ${spec.referenceInstructions.join(" ")}`
+      : undefined,
     `Keep the output looking like a real design draft, not a report or text slide.`,
     `High design quality, art-directed composition, premium lighting, strong hierarchy, no watermark.`
   ]
@@ -1051,6 +1205,79 @@ function buildOpenAiVisualPrompt(spec: VisualAssetSpec): string {
 }
 
 function createLocalSvgAsset(spec: VisualAssetSpec): ArtifactVisualAsset {
+  if ((spec.referenceImages?.length ?? 0) > 0) {
+    const { width, height } = getCanvas(spec.family);
+    const palette = pickPalette(`${spec.title}:${spec.subject}:reference`);
+    const titleLines = wrapText(spec.title, 18).slice(0, 3);
+    const subjectImage = spec.referenceImages?.[0];
+    const styleImage = spec.referenceImages?.[1];
+    const titleSvg = titleLines
+      .map((line, index) => {
+        const y = 140 + index * 70;
+        return `<text x="90" y="${y}" fill="${palette.ink}" font-size="56" font-weight="800" font-family="Helvetica">${escapeXml(line)}</text>`;
+      })
+      .join("");
+    const instruction = escapeXml(
+      shorten(
+        spec.referenceInstructions?.[0] ?? "Built from uploaded image references with a poster-first composition.",
+        88
+      )
+    );
+    const subjectLabel = escapeXml(subjectImage ? "Image 1 • Hero subject" : "Reference image");
+    const styleLabel = escapeXml(styleImage ? "Image 2 • Layout / style" : "Supporting reference");
+
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+        <defs>
+          <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="${palette.backgroundA}" />
+            <stop offset="100%" stop-color="${palette.backgroundB}" />
+          </linearGradient>
+          <linearGradient id="overlay" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#08101bcc" />
+            <stop offset="100%" stop-color="#08101b33" />
+          </linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#bg)" />
+        ${styleImage ? `<image href="${toDataUri(styleImage)}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="0.42" />` : ""}
+        <rect width="100%" height="100%" fill="url(#overlay)" />
+        <rect x="72" y="72" width="${width - 144}" height="${height - 144}" rx="34" fill="#0e1726aa" stroke="${palette.paper}" stroke-opacity="0.14" />
+        ${titleSvg}
+        <text x="92" y="${height - 168}" fill="${palette.accentSoft}" font-size="24" font-family="Helvetica">${instruction}</text>
+        ${
+          subjectImage
+            ? `<rect x="90" y="250" width="${Math.round(width * 0.38)}" height="${Math.round(height * 0.48)}" rx="24" fill="#ffffff22" />
+               <image href="${toDataUri(subjectImage)}" x="90" y="250" width="${Math.round(width * 0.38)}" height="${Math.round(height * 0.48)}" preserveAspectRatio="xMidYMid slice" />
+               <rect x="90" y="${250 + Math.round(height * 0.48) - 64}" width="${Math.round(width * 0.38)}" height="64" fill="#091524bb" />
+               <text x="114" y="${250 + Math.round(height * 0.48) - 24}" fill="${palette.paper}" font-size="22" font-family="Helvetica">${subjectLabel}</text>`
+            : ""
+        }
+        ${
+          styleImage
+            ? `<rect x="${Math.round(width * 0.56)}" y="286" width="${Math.round(width * 0.28)}" height="${Math.round(height * 0.28)}" rx="20" fill="#ffffff16" />
+               <image href="${toDataUri(styleImage)}" x="${Math.round(width * 0.56)}" y="286" width="${Math.round(width * 0.28)}" height="${Math.round(height * 0.28)}" preserveAspectRatio="xMidYMid slice" opacity="0.92" />
+               <rect x="${Math.round(width * 0.56)}" y="${286 + Math.round(height * 0.28) - 56}" width="${Math.round(width * 0.28)}" height="56" fill="#091524bb" />
+               <text x="${Math.round(width * 0.56) + 20}" y="${286 + Math.round(height * 0.28) - 20}" fill="${palette.paper}" font-size="20" font-family="Helvetica">${styleLabel}</text>`
+            : ""
+        }
+        <text x="${Math.round(width * 0.56)}" y="${Math.round(height * 0.70)}" fill="${palette.paper}" font-size="32" font-weight="700" font-family="Helvetica">${escapeXml(shorten(spec.recommendedDirection, 68))}</text>
+        <text x="${Math.round(width * 0.56)}" y="${Math.round(height * 0.76)}" fill="${palette.accent}" font-size="20" font-family="Helvetica">${escapeXml(shorten(spec.bigIdea, 86))}</text>
+        <text x="${Math.round(width * 0.56)}" y="${Math.round(height * 0.82)}" fill="${palette.paper}" font-size="18" font-family="Helvetica">${escapeXml(shorten(spec.layoutIdea, 96))}</text>
+      </svg>
+    `.replace(/\n\s+/g, "");
+
+    return {
+      kind: "document",
+      mimeType: "image/svg+xml",
+      fileName: `${slugify(spec.title)}.svg`,
+      base64Data: Buffer.from(svg, "utf8").toString("base64"),
+      width,
+      height,
+      source: "local_svg",
+      prompt: spec.prompt
+    };
+  }
+
   const { width, height } = getCanvas(spec.family);
   const palette = pickPalette(`${spec.title}:${spec.subject}`);
   const titleLines = wrapText(spec.title, spec.family === "landing_page_visual_direction" ? 18 : 14).slice(0, 3);
@@ -1166,7 +1393,8 @@ async function buildVisualAsset(
         prompt,
         size,
         quality: "medium",
-        background: "opaque"
+        background: "opaque",
+        referenceImages: spec.referenceImages
       });
 
       if (!generated) {
@@ -1194,7 +1422,8 @@ async function buildVisualAsset(
     try {
       const generated = await adapters.gemini.generateImage({
         prompt,
-        aspectRatio: getGeminiAspectRatio(size)
+        aspectRatio: getGeminiAspectRatio(size),
+        referenceImages: spec.referenceImages
       });
 
       if (!generated) {
@@ -1396,6 +1625,7 @@ async function buildImageArtifact(
   const assumptions = buildAssumptions(request, analysis.family);
   const styleOptions = buildStyleOptions("image_generation", subject);
   const finalPrompt = buildImagePrompt(subject, mood.visualDirection, request.revisionNote);
+  const referenceInstructions = request.referencePlan?.instructions ?? [];
   const recommendedDirection = request.revisionNote
     ? refineSentence(`Keep the original scene energy, then push it toward ${request.revisionNote}.`)
     : mood.direction;
@@ -1437,7 +1667,9 @@ async function buildImageArtifact(
       layoutIdea,
       nextAction,
       prompt: finalPrompt,
-      styleOptions
+      styleOptions,
+      referenceImages: request.referenceImages,
+      referenceInstructions
     },
     selectedProvider,
     adapters
@@ -1465,6 +1697,8 @@ async function buildImageArtifact(
     styleOptions,
     assumptions,
     nextAction,
+    referenceSummary: request.referencePlan?.summary ?? null,
+    referenceImageCount: request.referenceImages.length,
     visualAsset: serializeVisualAsset(visualAsset.asset),
     visualAssetPrompt: visualAsset.prompt,
     requestedProvider: selectedProvider,
@@ -1508,6 +1742,7 @@ async function buildDesignArtifact(
   const styleOptions = buildStyleOptions(family, request.brief);
   const copyDirection = buildCopyDirection(family, request);
   const needFromYou = buildNeedFromYou(family, request);
+  const referenceInstructions = request.referencePlan?.instructions ?? [];
   const previous = request.previousArtifact;
 
   const recommendedDirection =
@@ -1566,7 +1801,9 @@ async function buildDesignArtifact(
       copyDirection: copyDirection ?? undefined,
       nextAction,
       prompt: `${recommendedDirection} ${visualDirection} ${layoutIdea}`,
-      styleOptions
+      styleOptions,
+      referenceImages: request.referenceImages,
+      referenceInstructions
     },
     selectedProvider,
     adapters
@@ -1596,6 +1833,8 @@ async function buildDesignArtifact(
     assumptions,
     needFromYou: needFromYou ?? null,
     nextAction,
+    referenceSummary: request.referencePlan?.summary ?? null,
+    referenceImageCount: request.referenceImages.length,
     visualAsset: serializeVisualAsset(visualAsset.asset),
     visualAssetPrompt: visualAsset.prompt,
     requestedProvider: selectedProvider,

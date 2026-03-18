@@ -13,11 +13,12 @@ export function createSnapshotBuilder(repositories: DatabaseRepositories): Snaps
         return null;
       }
 
-      const [source, context, telegramBinding, jobs, latestDraftArtifact, latestVisibleArtifact, latestApproval, openRevision, timeline] =
+      const [source, context, telegramBinding, attachments, jobs, latestDraftArtifact, latestVisibleArtifact, latestApproval, openRevision, timeline] =
         await Promise.all([
           repositories.getProjectSourceByProjectId(projectId),
           repositories.getProjectContextByProjectId(projectId),
           repositories.getTelegramBindingByProjectId(projectId),
+          repositories.listAttachmentsByProjectId(projectId),
           repositories.listJobsByProjectId(projectId),
           repositories.getLatestDraftArtifactByProjectId(projectId),
           repositories.getLatestVisibleArtifactByProjectId(projectId),
@@ -46,6 +47,7 @@ export function createSnapshotBuilder(repositories: DatabaseRepositories): Snaps
         finalArtifact: finalArtifact ?? undefined,
         latestApproval: latestApproval ?? undefined,
         openRevision: openRevision ?? undefined,
+        attachments,
         jobs,
         timeline
       };

@@ -1,10 +1,11 @@
-import type { ArtifactVisualAsset } from "@ai-design-team/types";
+import type { ArtifactVisualAsset, AttachmentReferenceInput } from "@ai-design-team/types";
 
 export interface OpenAiImageGenerationInput {
   prompt: string;
   size?: "1024x1024" | "1024x1536" | "1536x1024";
   quality?: "low" | "medium" | "high";
   background?: "transparent" | "opaque" | "auto";
+  referenceImages?: AttachmentReferenceInput[];
 }
 
 export interface OpenAiImageGenerationResult {

@@ -58,7 +58,9 @@ export function createRevisionLifecycleService(repositories: DatabaseRepositorie
         revisionRequestId: revision.id,
         input: {
           revisionNote: input.revisionNote,
-          sourceArtifactId: artifact.id
+          sourceArtifactId: artifact.id,
+          sourceId: typeof input.metadata?.sourceId === "string" ? input.metadata.sourceId : null,
+          messageId: typeof input.metadata?.messageId === "string" ? input.metadata.messageId : null
         },
         metadata: input.metadata ?? {}
       });

@@ -309,7 +309,8 @@ export function createTelegramFlowService(
   async function queueFollowupJob(
     project: Project,
     input: TelegramInboundRequest,
-    provider: TelegramGenerationProvider
+    provider: TelegramGenerationProvider,
+    sourceId?: string
   ): Promise<Job> {
     const effectiveMessageText = getEffectiveMessageText(input);
     const enqueueInput: EnqueueArtifactJobInput = {
@@ -323,12 +324,14 @@ export function createTelegramFlowService(
         messageId: input.messageId ?? null,
         replyToMessageText: input.replyToMessage?.text ?? null,
         replyToMessageId: input.replyToMessage?.messageId ?? null,
-        provider
+        provider,
+        sourceId: sourceId ?? null
       },
       metadata: {
         traceId: input.dedupeKey,
         source: "telegram",
-        provider
+        provider,
+        sourceId: sourceId ?? null
       }
     };
 
@@ -431,7 +434,7 @@ export function createTelegramFlowService(
       status: "active"
     });
     await repositories.upsertProjectContext(context);
-    await persistInboundSource(repositories, input, project.id, true);
+    const source = await persistInboundSource(repositories, input, project.id, true);
     await touchBinding(repositories, binding, input, {
       awaitingRevisionNote: false,
       pendingRevisionArtifactId: undefined
@@ -445,7 +448,8 @@ export function createTelegramFlowService(
         updatedAt: timestamp
       },
       input,
-      getPreferredProvider(binding)
+      getPreferredProvider(binding),
+      source.id
     );
 
     return {
@@ -891,7 +895,7 @@ export function createTelegramFlowService(
       };
     }
 
-    await persistInboundSource(repositories, input, resolution.projectId, true);
+    const source = await persistInboundSource(repositories, input, resolution.projectId, true);
     const result = await dependencies.revisions.createRevision(
       {
         projectId: resolution.projectId,
@@ -901,7 +905,9 @@ export function createTelegramFlowService(
         metadata: {
           source: "telegram",
           traceId: input.dedupeKey,
-          provider: getPreferredProvider(binding)
+          provider: getPreferredProvider(binding),
+          sourceId: source.id,
+          messageId: input.messageId ?? null
         }
       },
       (enqueueInput) => dependencies.jobs.enqueue(enqueueInput)

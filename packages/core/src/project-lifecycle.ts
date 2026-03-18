@@ -89,12 +89,14 @@ export function createProjectLifecycleService(repositories: DatabaseRepositories
         input: {
           brief: input.brief,
           sourceKind: input.source.kind,
-          provider: preferredProvider
+          provider: preferredProvider,
+          sourceId: source.id
         },
         metadata: {
           provider: preferredProvider,
           traceId: typeof input.metadata?.traceId === "string" ? input.metadata.traceId : null,
-          sourceRef: input.source.sourceRef ?? null
+          sourceRef: input.source.sourceRef ?? null,
+          sourceId: source.id
         },
         createdAt: timestamp,
         updatedAt: timestamp

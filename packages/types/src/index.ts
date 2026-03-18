@@ -207,8 +207,22 @@ export interface ProjectSnapshot {
   finalArtifact?: Artifact;
   latestApproval?: Approval;
   openRevision?: RevisionRequest;
+  attachments: Attachment[];
   jobs: Job[];
   timeline: TimelineEvent[];
+}
+
+export interface AttachmentReferenceInput {
+  attachmentId: string;
+  sourceId?: string;
+  order: number;
+  kind: AttachmentKind;
+  fileName?: string;
+  mimeType: string;
+  storageKey?: string;
+  sizeBytes?: number;
+  role?: "subject" | "style" | "layout" | "reference";
+  base64Data: string;
 }
 
 export interface TelegramAttachmentMetadata {
