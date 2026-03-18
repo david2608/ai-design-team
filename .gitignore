@@ -1,0 +1,13 @@
+node_modules
+.turbo
+dist
+.next
+.tsbuildinfo
+.env
+.env.local
+.env.*.local
+coverage
+apps/telegram-bot
+packages/agents
+packages/prompts
+docs/future-assistants.md

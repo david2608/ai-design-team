@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./.tsbuildinfo"
+  },
+  "include": [
+    "src/index.ts",
+    "src/config/**/*.ts",
+    "src/http/**/*.ts",
+    "src/routes/**/*.ts",
+    "src/server/**/*.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}

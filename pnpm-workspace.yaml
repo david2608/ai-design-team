@@ -1,0 +1,12 @@
+packages:
+  - "apps/api"
+  - "apps/worker"
+  - "apps/figma-plugin"
+  - "packages/types"
+  - "packages/db"
+  - "packages/core"
+  - "packages/ai"
+  - "packages/integrations-telegram"
+  - "packages/integrations-openai"
+  - "packages/integrations-figma"
+  - "packages/utils"

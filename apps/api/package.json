@@ -1,0 +1,21 @@
+{
+  "name": "@ai-design-team/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ai-design-team/core": "workspace:*",
+    "@ai-design-team/db": "workspace:*",
+    "@ai-design-team/integrations-telegram": "workspace:*",
+    "@ai-design-team/types": "workspace:*",
+    "@ai-design-team/utils": "workspace:*"
+  }
+}

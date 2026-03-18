@@ -1,0 +1,61 @@
+services:
+  - type: web
+    name: ai-design-team-api
+    runtime: node
+    plan: starter
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm --filter @ai-design-team/api start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PORT
+        value: 10000
+      - key: API_PORT
+        value: 10000
+      - key: LOG_LEVEL
+        value: info
+      - key: DEBUG_ROUTES_ENABLED
+        value: "false"
+      - key: POSTGRES_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+
+  - type: worker
+    name: ai-design-team-worker
+    runtime: node
+    plan: starter
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm --filter @ai-design-team/worker start
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: LOG_LEVEL
+        value: info
+      - key: WORKER_RUNTIME_ENABLED
+        value: "true"
+      - key: WORKER_POLL_INTERVAL_MS
+        value: 2500
+      - key: WORKER_HEARTBEAT_INTERVAL_MS
+        value: 10000
+      - key: JOB_STALE_AFTER_MS
+        value: 30000
+      - key: POSTGRES_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_IMAGE_MODEL
+        value: gemini-2.5-flash-image
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5-mini
+      - key: OPENAI_IMAGE_MODEL
+        value: gpt-image-1.5
+      - key: OPENAI_ALLOW_STUB
+        value: "false"

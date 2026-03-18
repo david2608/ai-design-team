@@ -1,0 +1,69 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ai-design-team/types": [
+        "packages/types/src/index.ts"
+      ],
+      "@ai-design-team/types/*": [
+        "packages/types/src/*"
+      ],
+      "@ai-design-team/db": [
+        "packages/db/src/index.ts"
+      ],
+      "@ai-design-team/db/*": [
+        "packages/db/src/*"
+      ],
+      "@ai-design-team/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@ai-design-team/core/*": [
+        "packages/core/src/*"
+      ],
+      "@ai-design-team/ai": [
+        "packages/ai/src/index.ts"
+      ],
+      "@ai-design-team/ai/*": [
+        "packages/ai/src/*"
+      ],
+      "@ai-design-team/integrations-telegram": [
+        "packages/integrations-telegram/src/index.ts"
+      ],
+      "@ai-design-team/integrations-telegram/*": [
+        "packages/integrations-telegram/src/*"
+      ],
+      "@ai-design-team/integrations-openai": [
+        "packages/integrations-openai/src/index.ts"
+      ],
+      "@ai-design-team/integrations-openai/*": [
+        "packages/integrations-openai/src/*"
+      ],
+      "@ai-design-team/integrations-figma": [
+        "packages/integrations-figma/src/index.ts"
+      ],
+      "@ai-design-team/integrations-figma/*": [
+        "packages/integrations-figma/src/*"
+      ],
+      "@ai-design-team/utils": [
+        "packages/utils/src/index.ts"
+      ],
+      "@ai-design-team/utils/*": [
+        "packages/utils/src/*"
+      ]
+    }
+  }
+}

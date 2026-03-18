@@ -1,0 +1,26 @@
+{
+  "name": "ai-design-team-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build": "turbo build",
+    "clean": "turbo clean",
+    "db:migrate": "pnpm --filter @ai-design-team/db migrate",
+    "db:seed": "pnpm --filter @ai-design-team/db seed",
+    "dev": "turbo dev --parallel",
+    "dev:api": "pnpm --filter @ai-design-team/api dev",
+    "dev:worker": "pnpm --filter @ai-design-team/worker dev",
+    "dev:figma-plugin": "pnpm --filter @ai-design-team/figma-plugin dev",
+    "lint": "turbo typecheck",
+    "setup:local": "node ./scripts/setup-local.mjs",
+    "typecheck": "turbo typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "turbo": "^2.4.4",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.2"
+  }
+}
