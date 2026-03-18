@@ -26,7 +26,7 @@ export function getWorkerEnv(): WorkerEnv {
     databaseUrl: getStringEnv("POSTGRES_URL"),
     logLevel: getStringEnv("LOG_LEVEL", "info"),
     geminiModel: getStringEnv("GEMINI_MODEL", "gemini-2.5-pro"),
-    geminiImageModel: getStringEnv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"),
+    geminiImageModel: getStringEnv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview"),
     geminiApiKey: getStringEnv("GEMINI_API_KEY", ""),
     openAiModel: getStringEnv("OPENAI_MODEL", "gpt-5-mini"),
     openAiImageModel: getStringEnv("OPENAI_IMAGE_MODEL", "gpt-image-1.5"),

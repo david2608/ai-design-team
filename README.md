@@ -39,7 +39,15 @@ Phase 3 Telegram ingress and project flow for the approved generator-first Teleg
 - `pnpm dev:worker`
 - `pnpm dev:figma-plugin`
 
-`apps/api` now accepts Telegram webhook updates at `/telegram/webhook`, and `apps/worker` delivers compact artifact messages with Like / Dislike / Revise callbacks when a Telegram binding exists.
+`apps/api` now accepts Telegram webhook updates at `/telegram/webhook`, and `apps/worker` delivers compact artifact messages with Finish / Revise callbacks when a Telegram binding exists.
+
+## Gemini defaults
+
+- Gemini is the default generation provider for new Telegram threads unless the user explicitly sends `use_gpt`.
+- Planning defaults to `GEMINI_MODEL=gemini-2.5-pro`.
+- Rendering defaults to `GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview`.
+- For higher-end rendering, you can switch `GEMINI_IMAGE_MODEL` to `gemini-3-pro-image-preview`.
+- Uploaded Telegram images are passed through as real model inputs during generation.
 
 ## Build and typecheck
 
