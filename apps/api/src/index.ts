@@ -5,6 +5,7 @@ import { createApiServer } from "./server/router.js";
 const env = getApiEnv();
 const context = createApiContext(env);
 const server = createApiServer(context);
+const host = "0.0.0.0";
 
 context.logger.info("api.startup", {
   port: env.apiPort,
@@ -14,8 +15,9 @@ context.logger.info("api.startup", {
   debugRoutesEnabled: env.debugRoutesEnabled
 });
 
-server.listen(env.apiPort, () => {
+server.listen(env.apiPort, host, () => {
   context.logger.info("API server listening", {
-    port: env.apiPort
+    port: env.apiPort,
+    host
   });
 });
