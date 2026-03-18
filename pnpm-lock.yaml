@@ -74,6 +74,9 @@ importers:
 
   packages/ai:
     dependencies:
+      '@ai-design-team/integrations-openai':
+        specifier: workspace:*
+        version: link:../integrations-openai
       '@ai-design-team/types':
         specifier: workspace:*
         version: link:../types
