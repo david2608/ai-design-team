@@ -247,9 +247,13 @@ function toJsonValue(value: JsonObject): JSONValue {
 }
 
 export function createDatabaseClient(databaseUrl: string): DatabaseClient {
+  const parsedUrl = new URL(databaseUrl);
+  const isSupabaseHost = parsedUrl.hostname.includes("supabase.com");
   const sql = postgres(databaseUrl, {
     max: 4,
-    idle_timeout: 5
+    idle_timeout: 5,
+    prepare: false,
+    ssl: isSupabaseHost ? "require" : undefined
   });
 
   const repositories: DatabaseRepositories = {
