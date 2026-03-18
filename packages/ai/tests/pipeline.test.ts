@@ -105,6 +105,7 @@ test("pipeline uses Gemini by default for new jobs and stores the Gemini asset w
   const pipeline = createArtifactGenerationPipeline({
     gemini: {
       provider: "gemini",
+      reasoningModel: "gemini-2.5-pro",
       model: "gemini-2.5-flash-image",
       status: "live",
       async generateImage() {
@@ -161,6 +162,7 @@ test("pipeline falls back to OpenAI when Gemini is selected but fails before pro
   const pipeline = createArtifactGenerationPipeline({
     gemini: {
       provider: "gemini",
+      reasoningModel: "gemini-2.5-pro",
       model: "gemini-2.5-flash-image",
       status: "live",
       async generateImage() {
@@ -285,6 +287,7 @@ test("pipeline passes uploaded image references into generation for image remix 
   const pipeline = createArtifactGenerationPipeline({
     gemini: {
       provider: "gemini",
+      reasoningModel: "gemini-2.5-pro",
       model: "gemini-2.5-flash-image",
       status: "live",
       async generateImage(input) {
@@ -344,6 +347,85 @@ test("pipeline passes uploaded image references into generation for image remix 
   assert.match(geminiInput.prompt, /Use image 1 as the main subject/i);
   assert.equal((result.body as any).referenceImageCount, 2);
   assert.equal((result.body as any).visualAsset.source, "gemini");
+});
+
+test("pipeline uses Gemini creative planning when available to improve artifact content", async () => {
+  const pipeline = createArtifactGenerationPipeline({
+    gemini: {
+      provider: "gemini",
+      reasoningModel: "gemini-2.5-pro",
+      model: "gemini-2.5-flash-image",
+      status: "live",
+      async generateCreativePlan() {
+        return {
+          title: "Levon Campaign Poster",
+          recommendedDirection: "Preserve the portrait from image 1 and rebuild the campaign framing from image 2.",
+          bigIdea: "Merge the candidate portrait with the stronger campaign system so it feels intentional and electable.",
+          visualDirection: "Use the first portrait as the hero crop, then borrow the second image's hierarchy, badge treatment, and contrast.",
+          layoutIdea: "Hero portrait dominant, campaign copy stacked left, support badge and quote framed from the second image.",
+          finalPrompt: "Poster composition using image 1 as hero portrait and image 2 as campaign layout reference.",
+          assumptions: ["Assuming image 1 is the correct person to preserve."],
+          styleOptions: ["High-contrast campaign poster", "Sharper editorial framing", "More formal political branding"],
+          nextAction: "If the merge is right, send one revision note and I will tighten the typography."
+        };
+      },
+      async generateImage(input) {
+        return {
+          asset: {
+            kind: "photo",
+            mimeType: "image/png",
+            fileName: "artifact.png",
+            base64Data: "ZmFrZQ==",
+            source: "gemini",
+            prompt: input.prompt
+          }
+        };
+      }
+    }
+  });
+
+  const result = await pipeline.generate(baseSnapshot as any, {
+    id: "job_4b",
+    projectId: "project_1",
+    type: "artifact_generation",
+    status: "running",
+    queue: "default",
+    availableAt: new Date().toISOString(),
+    attemptCount: 1,
+    maxAttempts: 3,
+    input: {
+      messageText: "Create poster from the 1st uploaded guy image using all other data from 2nd image.",
+      attachmentReferences: [
+        {
+          attachmentId: "attachment_1",
+          order: 1,
+          kind: "image",
+          mimeType: "image/jpeg",
+          fileName: "person.jpg",
+          base64Data: "ZmFrZTE="
+        },
+        {
+          attachmentId: "attachment_2",
+          order: 2,
+          kind: "image",
+          mimeType: "image/jpeg",
+          fileName: "poster.jpg",
+          base64Data: "ZmFrZTI="
+        }
+      ]
+    },
+    metadata: {
+      provider: "gemini"
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  } as any);
+
+  assert.equal(result.title, "Levon Campaign Poster");
+  assert.match(result.summary, /Preserve the portrait from image 1/i);
+  assert.equal((result.body as any).recommendedDirection, "Preserve the portrait from image 1 and rebuild the campaign framing from image 2.");
+  assert.match((result.body as any).visualAssetPrompt, /Levon Campaign Poster/);
+  assert.match((result.body as any).visualAssetPrompt, /Reference-image instructions:/);
 });
 
 test("pipeline fallback visual uses uploaded image references when live generation is unavailable", async () => {

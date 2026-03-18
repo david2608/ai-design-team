@@ -17,6 +17,7 @@ export function createWorkerContext(env: WorkerEnv) {
   const logger = createLogger(env.logLevel as "debug" | "info" | "warn" | "error", "worker");
   const gemini = createGeminiAdapter({
     apiKey: env.geminiApiKey,
+    reasoningModel: env.geminiModel,
     imageModel: env.geminiImageModel
   });
   const openAi = createOpenAiAdapter({

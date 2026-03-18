@@ -7,6 +7,7 @@ loadEnvFiles([resolve(process.cwd(), ".env"), resolve(process.cwd(), "apps/worke
 export interface WorkerEnv {
   databaseUrl: string;
   logLevel: string;
+  geminiModel: string;
   geminiImageModel: string;
   geminiApiKey: string;
   openAiModel: string;
@@ -24,6 +25,7 @@ export function getWorkerEnv(): WorkerEnv {
   return {
     databaseUrl: getStringEnv("POSTGRES_URL"),
     logLevel: getStringEnv("LOG_LEVEL", "info"),
+    geminiModel: getStringEnv("GEMINI_MODEL", "gemini-2.5-pro"),
     geminiImageModel: getStringEnv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"),
     geminiApiKey: getStringEnv("GEMINI_API_KEY", ""),
     openAiModel: getStringEnv("OPENAI_MODEL", "gpt-5-mini"),

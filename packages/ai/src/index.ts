@@ -70,15 +70,44 @@ export interface GeminiImageGenerationResult {
   asset: ArtifactVisualAsset;
 }
 
+interface GeminiCreativePlanInput {
+  brief: string;
+  latestMessage?: string;
+  revisionNote?: string;
+  familyHint: CreativeIntentFamily;
+  isRevision: boolean;
+  previousArtifact?: NormalizedCreativeRequest["previousArtifact"];
+  referencePlan?: NormalizedCreativeRequest["referencePlan"];
+  referenceImages: AttachmentReferenceInput[];
+}
+
+interface GeminiCreativePlan {
+  title?: string;
+  recommendedDirection?: string;
+  bigIdea?: string;
+  visualDirection?: string;
+  layoutIdea?: string;
+  copyDirection?: string;
+  finalPrompt?: string;
+  styleOptions?: string[];
+  alternatives?: string[];
+  assumptions?: string[];
+  needFromYou?: string;
+  nextAction?: string;
+}
+
 export interface GeminiAdapter {
   provider: "gemini";
+  reasoningModel: string;
   model: string;
   status: "live" | "placeholder";
   generateImage(input: GeminiImageGenerationInput): Promise<GeminiImageGenerationResult | null>;
+  generateCreativePlan?(input: GeminiCreativePlanInput): Promise<GeminiCreativePlan | null>;
 }
 
 export interface CreateGeminiAdapterInput {
   apiKey?: string;
+  reasoningModel: string;
   imageModel: string;
 }
 
@@ -169,6 +198,71 @@ const STYLE_CONFLICTS: Array<{
 ];
 
 const GEMINI_IMAGE_TIMEOUT_MS = 20_000;
+const GEMINI_REASONING_TIMEOUT_MS = 25_000;
+
+function extractGeminiTextResponse(result: GeminiGenerateContentResponse): string | null {
+  const parts = result.candidates?.[0]?.content?.parts ?? [];
+  const text = parts
+    .map((part) => (typeof part.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+
+  return text || null;
+}
+
+function parseGeminiJson<T>(value: string): T | null {
+  const trimmed = value
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/, "");
+
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    return null;
+  }
+}
+
+function buildGeminiCreativePlanPrompt(input: GeminiCreativePlanInput): string {
+  const context = [
+    `Primary brief: ${input.latestMessage ?? input.brief}`,
+    input.revisionNote ? `Revision note: ${input.revisionNote}` : undefined,
+    `Intent family hint: ${input.familyHint}`,
+    `Mode: ${input.isRevision ? "revision" : "first_pass"}`,
+    input.previousArtifact?.recommendedDirection
+      ? `Previous recommended direction: ${input.previousArtifact.recommendedDirection}`
+      : undefined,
+    input.previousArtifact?.bigIdea ? `Previous big idea: ${input.previousArtifact.bigIdea}` : undefined,
+    input.previousArtifact?.visualDirection
+      ? `Previous visual direction: ${input.previousArtifact.visualDirection}`
+      : undefined,
+    input.previousArtifact?.layoutIdea ? `Previous layout idea: ${input.previousArtifact.layoutIdea}` : undefined,
+    input.referencePlan?.summary ? `Reference-image summary: ${input.referencePlan.summary}` : undefined,
+    input.referencePlan?.instructions?.length
+      ? `Reference-image instructions: ${input.referencePlan.instructions.join(" ")}`
+      : undefined,
+    `Reference image count: ${input.referenceImages.length}`
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return [
+    "You are a world-class visual design director creating one strong merged design artifact.",
+    "Use the brief, revision context, and all supplied images together.",
+    "Do not produce analysis, diagnostics, or narrator-style summaries.",
+    "Return only strict JSON with these keys:",
+    "title, recommendedDirection, bigIdea, visualDirection, layoutIdea, copyDirection, finalPrompt, styleOptions, alternatives, assumptions, needFromYou, nextAction",
+    "Rules:",
+    "- recommendedDirection, bigIdea, visualDirection, layoutIdea, and nextAction should be concise but specific.",
+    "- styleOptions, alternatives, and assumptions should be arrays of short strings.",
+    "- needFromYou should be null unless one truly useful missing detail remains.",
+    "- If reference images are present, use them directly and preserve their roles.",
+    "- finalPrompt should describe the actual visual to generate, not the workflow.",
+    "",
+    context
+  ].join("\n");
+}
 
 class LiveGeminiAdapter implements GeminiAdapter {
   readonly provider = "gemini" as const;
@@ -176,6 +270,7 @@ class LiveGeminiAdapter implements GeminiAdapter {
 
   constructor(
     private readonly apiKey: string,
+    readonly reasoningModel: string,
     readonly model: string
   ) {}
 
@@ -238,15 +333,74 @@ class LiveGeminiAdapter implements GeminiAdapter {
       }
     };
   }
+
+  async generateCreativePlan(input: GeminiCreativePlanInput): Promise<GeminiCreativePlan | null> {
+    const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
+      {
+        text: buildGeminiCreativePlanPrompt(input)
+      }
+    ];
+
+    for (const reference of input.referenceImages) {
+      parts.push({
+        inlineData: {
+          mimeType: reference.mimeType,
+          data: reference.base64Data
+        }
+      });
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${this.reasoningModel}:generateContent`,
+      {
+        method: "POST",
+        signal: AbortSignal.timeout(GEMINI_REASONING_TIMEOUT_MS),
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": this.apiKey
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts
+            }
+          ],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Gemini creative planning failed: ${response.status} ${body}`);
+    }
+
+    const result = (await response.json()) as GeminiGenerateContentResponse;
+    const text = extractGeminiTextResponse(result);
+    if (!text) {
+      return null;
+    }
+
+    return parseGeminiJson<GeminiCreativePlan>(text);
+  }
 }
 
 class PlaceholderGeminiAdapter implements GeminiAdapter {
   readonly provider = "gemini" as const;
   readonly status = "placeholder" as const;
 
-  constructor(readonly model: string) {}
+  constructor(
+    readonly reasoningModel: string,
+    readonly model: string
+  ) {}
 
   async generateImage(): Promise<GeminiImageGenerationResult | null> {
+    return null;
+  }
+
+  async generateCreativePlan(): Promise<GeminiCreativePlan | null> {
     return null;
   }
 }
@@ -254,10 +408,10 @@ class PlaceholderGeminiAdapter implements GeminiAdapter {
 export function createGeminiAdapter(input: CreateGeminiAdapterInput): GeminiAdapter {
   const apiKey = input.apiKey?.trim();
   if (!apiKey) {
-    return new PlaceholderGeminiAdapter(input.imageModel);
+    return new PlaceholderGeminiAdapter(input.reasoningModel, input.imageModel);
   }
 
-  return new LiveGeminiAdapter(apiKey, input.imageModel);
+  return new LiveGeminiAdapter(apiKey, input.reasoningModel, input.imageModel);
 }
 
 function cleanText(value: string | undefined): string | undefined {
@@ -1039,6 +1193,59 @@ function buildNeedFromYou(family: CreativeIntentFamily, request: NormalizedCreat
   return undefined;
 }
 
+function normalizeStringArray(values: string[] | undefined): string[] {
+  return (values ?? []).map((value) => cleanText(value)).filter((value): value is string => Boolean(value));
+}
+
+function normalizeGeminiPlan(plan: GeminiCreativePlan | null): GeminiCreativePlan | null {
+  if (!plan) {
+    return null;
+  }
+
+  return {
+    title: cleanText(plan.title),
+    recommendedDirection: cleanText(plan.recommendedDirection),
+    bigIdea: cleanText(plan.bigIdea),
+    visualDirection: cleanText(plan.visualDirection),
+    layoutIdea: cleanText(plan.layoutIdea),
+    copyDirection: cleanText(plan.copyDirection),
+    finalPrompt: cleanText(plan.finalPrompt),
+    styleOptions: normalizeStringArray(plan.styleOptions),
+    alternatives: normalizeStringArray(plan.alternatives),
+    assumptions: normalizeStringArray(plan.assumptions),
+    needFromYou: cleanText(plan.needFromYou),
+    nextAction: cleanText(plan.nextAction)
+  };
+}
+
+async function maybeGenerateGeminiCreativePlan(
+  request: NormalizedCreativeRequest,
+  family: CreativeIntentFamily,
+  job: Job,
+  gemini?: GeminiAdapter
+): Promise<GeminiCreativePlan | null> {
+  if (gemini?.status !== "live" || !gemini.generateCreativePlan) {
+    return null;
+  }
+
+  try {
+    return normalizeGeminiPlan(
+      await gemini.generateCreativePlan({
+        brief: request.brief,
+        latestMessage: request.latestMessage,
+        revisionNote: request.revisionNote,
+        familyHint: family,
+        isRevision: job.type === "artifact_revision",
+        previousArtifact: request.previousArtifact,
+        referencePlan: request.referencePlan,
+        referenceImages: request.referenceImages
+      })
+    );
+  } catch {
+    return null;
+  }
+}
+
 function refineSentence(value: string): string {
   return value
     .replace(/\s+/g, " ")
@@ -1622,20 +1829,24 @@ async function buildImageArtifact(
 ): Promise<ArtifactPipelineResult> {
   const subject = extractSubject(request.latestMessage ?? request.brief);
   const mood = deriveMoodPhrases("image_generation", `${request.brief}:${request.revisionNote ?? ""}`);
-  const assumptions = buildAssumptions(request, analysis.family);
-  const styleOptions = buildStyleOptions("image_generation", subject);
-  const finalPrompt = buildImagePrompt(subject, mood.visualDirection, request.revisionNote);
+  const geminiPlan = await maybeGenerateGeminiCreativePlan(request, analysis.family, job, adapters.gemini);
+  const assumptions = geminiPlan?.assumptions?.length ? geminiPlan.assumptions : buildAssumptions(request, analysis.family);
+  const styleOptions = geminiPlan?.styleOptions?.length ? geminiPlan.styleOptions : buildStyleOptions("image_generation", subject);
   const referenceInstructions = request.referencePlan?.instructions ?? [];
   const recommendedDirection = request.revisionNote
-    ? refineSentence(`Keep the original scene energy, then push it toward ${request.revisionNote}.`)
-    : mood.direction;
+    ? geminiPlan?.recommendedDirection ??
+      refineSentence(`Keep the original scene energy, then push it toward ${request.revisionNote}.`)
+    : geminiPlan?.recommendedDirection ?? mood.direction;
   const bigIdea =
     request.revisionNote && request.previousArtifact?.bigIdea
-      ? refineSentence(`${request.previousArtifact.bigIdea} Then refine it with ${request.revisionNote}.`)
-      : mood.bigIdea;
-  const visualDirection = mood.visualDirection;
-  const layoutIdea = buildLayoutIdea("image_generation", subject);
-  const nextAction = buildNextAction(analysis.family, job.type === "artifact_revision");
+      ? geminiPlan?.bigIdea ??
+        refineSentence(`${request.previousArtifact.bigIdea} Then refine it with ${request.revisionNote}.`)
+      : geminiPlan?.bigIdea ?? mood.bigIdea;
+  const visualDirection = geminiPlan?.visualDirection ?? mood.visualDirection;
+  const layoutIdea = geminiPlan?.layoutIdea ?? buildLayoutIdea("image_generation", subject);
+  const finalPrompt = geminiPlan?.finalPrompt ?? buildImagePrompt(subject, visualDirection, request.revisionNote);
+  const nextAction = geminiPlan?.nextAction ?? buildNextAction(analysis.family, job.type === "artifact_revision");
+  const resultTitle = geminiPlan?.title ?? buildResultTitle(request, analysis.family, job);
 
   await emitStage(observer, {
     id: "compose",
@@ -1644,7 +1855,7 @@ async function buildImageArtifact(
     detail: recommendedDirection
   });
   await emitPreview(observer, {
-    title: buildResultTitle(request, analysis.family, job),
+    title: resultTitle,
     recommendedDirection,
     bigIdea,
     nextStep: "Rendering the visual draft now."
@@ -1659,7 +1870,7 @@ async function buildImageArtifact(
   const visualAsset = await buildVisualAsset(
     {
       family: "image_generation",
-      title: buildResultTitle(request, analysis.family, job),
+      title: resultTitle,
       subject,
       recommendedDirection,
       bigIdea,
@@ -1688,7 +1899,7 @@ async function buildImageArtifact(
   const body = {
     artifactType: "design_result",
     intentFamily: analysis.family,
-    title: buildResultTitle(request, analysis.family, job),
+    title: resultTitle,
     recommendedDirection,
     bigIdea,
     visualDirection,
@@ -1737,38 +1948,45 @@ async function buildDesignArtifact(
   const family = analysis.family === "mixed_or_ambiguous" ? "visual_design" : analysis.family;
   const subject = extractSubject(request.latestMessage ?? request.brief);
   const mood = deriveMoodPhrases(family, `${subject}:${request.revisionNote ?? ""}`);
-  const assumptions = buildAssumptions(request, family);
-  const alternatives = buildAlternatives(family, subject, request.brief);
-  const styleOptions = buildStyleOptions(family, request.brief);
-  const copyDirection = buildCopyDirection(family, request);
-  const needFromYou = buildNeedFromYou(family, request);
+  const geminiPlan = await maybeGenerateGeminiCreativePlan(request, family, job, adapters.gemini);
+  const assumptions = geminiPlan?.assumptions?.length ? geminiPlan.assumptions : buildAssumptions(request, family);
+  const alternatives = geminiPlan?.alternatives?.length ? geminiPlan.alternatives : buildAlternatives(family, subject, request.brief);
+  const styleOptions = geminiPlan?.styleOptions?.length ? geminiPlan.styleOptions : buildStyleOptions(family, request.brief);
+  const copyDirection = geminiPlan?.copyDirection ?? buildCopyDirection(family, request);
+  const needFromYou = geminiPlan?.needFromYou ?? buildNeedFromYou(family, request);
   const referenceInstructions = request.referencePlan?.instructions ?? [];
   const previous = request.previousArtifact;
 
   const recommendedDirection =
     job.type === "artifact_revision" && request.revisionNote
-      ? refineSentence(
+      ? geminiPlan?.recommendedDirection ??
+        refineSentence(
           `Keep the core direction${previous?.recommendedDirection ? ` from "${previous.recommendedDirection}"` : ""}, then shift it toward ${request.revisionNote}.`
         )
-      : mood.direction;
+      : geminiPlan?.recommendedDirection ?? mood.direction;
 
   const bigIdea =
     job.type === "artifact_revision" && request.revisionNote
-      ? refineSentence(
+      ? geminiPlan?.bigIdea ??
+        refineSentence(
           `${previous?.bigIdea ?? mood.bigIdea} Update the result so the change feels intentional, not pasted on.`
         )
-      : mood.bigIdea;
+      : geminiPlan?.bigIdea ?? mood.bigIdea;
 
   const visualDirection =
     job.type === "artifact_revision" && request.revisionNote && previous?.visualDirection
-      ? refineSentence(`${previous.visualDirection} Then adapt it toward ${request.revisionNote}.`)
-      : mood.visualDirection;
+      ? geminiPlan?.visualDirection ??
+        refineSentence(`${previous.visualDirection} Then adapt it toward ${request.revisionNote}.`)
+      : geminiPlan?.visualDirection ?? mood.visualDirection;
 
   const layoutIdea =
     job.type === "artifact_revision" && previous?.layoutIdea
-      ? refineSentence(`${previous.layoutIdea} Keep that structure, but tune the emphasis for the new request.`)
-      : buildLayoutIdea(family, subject);
-  const nextAction = buildNextAction(family, job.type === "artifact_revision");
+      ? geminiPlan?.layoutIdea ??
+        refineSentence(`${previous.layoutIdea} Keep that structure, but tune the emphasis for the new request.`)
+      : geminiPlan?.layoutIdea ?? buildLayoutIdea(family, subject);
+  const nextAction = geminiPlan?.nextAction ?? buildNextAction(family, job.type === "artifact_revision");
+  const resultTitle = geminiPlan?.title ?? buildResultTitle(request, family, job);
+  const renderPrompt = geminiPlan?.finalPrompt ?? `${recommendedDirection} ${visualDirection} ${layoutIdea}`;
 
   await emitStage(observer, {
     id: "compose",
@@ -1777,7 +1995,7 @@ async function buildDesignArtifact(
     detail: recommendedDirection
   });
   await emitPreview(observer, {
-    title: buildResultTitle(request, family, job),
+    title: resultTitle,
     recommendedDirection,
     bigIdea,
     nextStep: "Rendering the visual draft now."
@@ -1792,7 +2010,7 @@ async function buildDesignArtifact(
   const visualAsset = await buildVisualAsset(
     {
       family,
-      title: buildResultTitle(request, family, job),
+      title: resultTitle,
       subject,
       recommendedDirection,
       bigIdea,
@@ -1800,7 +2018,7 @@ async function buildDesignArtifact(
       layoutIdea,
       copyDirection: copyDirection ?? undefined,
       nextAction,
-      prompt: `${recommendedDirection} ${visualDirection} ${layoutIdea}`,
+      prompt: renderPrompt,
       styleOptions,
       referenceImages: request.referenceImages,
       referenceInstructions
@@ -1822,7 +2040,7 @@ async function buildDesignArtifact(
   const body = {
     artifactType: "design_result",
     intentFamily: family,
-    title: buildResultTitle(request, family, job),
+    title: resultTitle,
     recommendedDirection,
     bigIdea,
     visualDirection,
