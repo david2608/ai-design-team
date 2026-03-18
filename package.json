@@ -6,6 +6,8 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "build": "turbo build",
+    "build:api": "pnpm --filter @ai-design-team/api... build",
+    "build:worker": "pnpm --filter @ai-design-team/worker... build",
     "clean": "turbo clean",
     "db:migrate": "pnpm --filter @ai-design-team/db migrate",
     "db:seed": "pnpm --filter @ai-design-team/db seed",
@@ -15,6 +17,8 @@
     "dev:figma-plugin": "pnpm --filter @ai-design-team/figma-plugin dev",
     "lint": "turbo typecheck",
     "setup:local": "node ./scripts/setup-local.mjs",
+    "start:api": "pnpm --filter @ai-design-team/api start",
+    "start:worker": "pnpm --filter @ai-design-team/worker start",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
