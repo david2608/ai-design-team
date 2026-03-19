@@ -58,6 +58,42 @@ test("pipeline falls back to a local visual artifact when no live image is retur
   assert.equal((result.body as any).visualAsset.kind, "document");
 });
 
+test("pipeline does not ship the local svg fallback as a final result when a live renderer fails", async () => {
+  const pipeline = createArtifactGenerationPipeline({
+    gemini: {
+      provider: "gemini",
+      reasoningModel: "gemini-2.5-pro",
+      model: "gemini-3.1-flash-image-preview",
+      status: "live",
+      async generateImage() {
+        return null;
+      }
+    }
+  });
+
+  const result = await pipeline.generate(baseSnapshot as any, {
+    id: "job_1b",
+    projectId: "project_1",
+    type: "artifact_generation",
+    status: "running",
+    queue: "default",
+    availableAt: new Date().toISOString(),
+    attemptCount: 1,
+    maxAttempts: 3,
+    input: {
+      messageText: "design poster for Ruben Malayan calligraphy lesson"
+    },
+    metadata: {
+      provider: "gemini"
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  } as any);
+
+  assert.equal(result.kind, "question");
+  assert.equal((result.body as any).renderFailure, true);
+});
+
 test("pipeline stores an OpenAI image as the primary visual artifact when available", async () => {
   const pipeline = createArtifactGenerationPipeline({
     openAi: {

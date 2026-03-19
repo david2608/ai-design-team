@@ -1274,6 +1274,52 @@ interface VisualAssetResult {
   prompt: string;
 }
 
+function hasLiveRenderProvider(adapters: ArtifactGenerationPipelineInput): boolean {
+  return adapters.gemini?.status === "live" || adapters.openAi?.status === "live";
+}
+
+function buildRenderRetryQuestionArtifact(input: {
+  family: CreativeIntentFamily;
+  title: string;
+  selectedProvider: TelegramGenerationProvider;
+}): ArtifactPipelineResult {
+  const question =
+    input.family === "image_generation"
+      ? "I did not get a clean image render on that pass. Should I retry the render or adjust the direction first?"
+      : "I did not get a clean visual render on that pass. Should I retry the render or adjust the direction first?";
+
+  const body: JsonObject = {
+    artifactType: "question",
+    question,
+    options: [
+      "RETRY - render the same direction again",
+      "SUBJECT - preserve the subject more strictly",
+      "LAYOUT - preserve the layout/style more strictly"
+    ],
+    needFromYou: "RETRY, SUBJECT, or LAYOUT",
+    renderFailure: true,
+    requestedProvider: input.selectedProvider
+  };
+
+  return {
+    kind: "question",
+    title: "One quick retry choice",
+    summary: question,
+    format: "markdown",
+    body,
+    renderedText: renderQuestionArtifact({
+      title: "One quick retry choice",
+      question,
+      options: [
+        "RETRY - render the same direction again",
+        "SUBJECT - preserve the subject more strictly",
+        "LAYOUT - preserve the layout/style more strictly"
+      ],
+      needFromYou: "RETRY, SUBJECT, or LAYOUT"
+    })
+  };
+}
+
 function escapeXml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -1896,6 +1942,21 @@ async function buildImageArtifact(
         : `Visual artifact generated with ${visualAsset.asset.source}.`
   });
 
+  if (visualAsset.asset.source === "local_svg" && hasLiveRenderProvider(adapters)) {
+    await emitStage(observer, {
+      id: "render",
+      label: "Render",
+      status: "failed",
+      detail: "The live model did not return a clean image render."
+    });
+
+    return buildRenderRetryQuestionArtifact({
+      family: analysis.family,
+      title: resultTitle,
+      selectedProvider
+    });
+  }
+
   const body = {
     artifactType: "design_result",
     intentFamily: analysis.family,
@@ -2036,6 +2097,21 @@ async function buildDesignArtifact(
         ? "Local fallback visual built and packaged."
         : `Visual artifact generated with ${visualAsset.asset.source}.`
   });
+
+  if (visualAsset.asset.source === "local_svg" && hasLiveRenderProvider(adapters)) {
+    await emitStage(observer, {
+      id: "render",
+      label: "Render",
+      status: "failed",
+      detail: "The live model did not return a clean visual render."
+    });
+
+    return buildRenderRetryQuestionArtifact({
+      family,
+      title: resultTitle,
+      selectedProvider
+    });
+  }
 
   const body = {
     artifactType: "design_result",
